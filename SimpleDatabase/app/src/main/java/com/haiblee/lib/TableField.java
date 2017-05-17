@@ -1,7 +1,5 @@
 package com.haiblee.lib;
 
-import android.text.TextUtils;
-
 /**
  * Created by Haibiao.Li on 2017/3/15 0015 12:12.
  * <br>Email:lihaibiaowork@gmail.com</br>
@@ -22,7 +20,6 @@ public class TableField {
     private final String name;
     private Typed typed;
     private Object defValue;
-    private String indexName;
     private int attrFlag;
 
     public TableField(String name) {
@@ -34,10 +31,10 @@ public class TableField {
     }
 
     public TableField(String name, int attrFlag) {
-        this(name,Typed.TEXT,attrFlag);
+        this(name, Typed.TEXT,attrFlag);
     }
 
-    public TableField(String name,Typed typed,int flag){
+    public TableField(String name, Typed typed, int flag){
         this.name = name;
         this.typed = typed;
         this.attrFlag = flag;
@@ -60,15 +57,6 @@ public class TableField {
         return this;
     }
 
-    public String getIndexName() {
-        return TextUtils.isEmpty(indexName) ? name : indexName;
-    }
-
-    public TableField setIndexName(String indexName) {
-        this.indexName = indexName;
-        return this;
-    }
-
     public void setAttrFlag(int flag){
         this.attrFlag = flag;
     }
@@ -83,7 +71,6 @@ public class TableField {
                 "name='" + name + '\'' +
                 ", typed=" + typed +
                 ", defValue=" + defValue +
-                ", indexName='" + indexName + '\'' +
                 ", attrFlag=" + Integer.toHexString(attrFlag) +
                 '}';
     }

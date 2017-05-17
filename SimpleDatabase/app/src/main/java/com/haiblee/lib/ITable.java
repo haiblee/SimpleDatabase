@@ -7,6 +7,8 @@ package com.haiblee.lib;
  */
 
 public interface ITable {
+    String ROW_ID_NAME = "rowid";
+
     String tableName();
     String[] createTableSQL();
     String[] alterTableSQL(int version);

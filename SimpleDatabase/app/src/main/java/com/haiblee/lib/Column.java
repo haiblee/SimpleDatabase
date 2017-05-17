@@ -18,4 +18,9 @@ public class Column {
     public static Column create(int index,String name){
         return new Column(index,name);
     }
+
+    @Override
+    public String toString() {
+        return name;
+    }
 }

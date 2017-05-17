@@ -4,241 +4,225 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.SQLException;
-import android.database.sqlite.SQLiteDatabase;
-import android.support.v4.util.Pools;
-import android.util.Log;
+import android.os.Build;
 import android.util.SparseArray;
 
-
 import java.util.Arrays;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+
 
 /**
  * Created by Haibiao.Li on 2017/4/20 0020 15:10.
  * <br>Email:lihaibiaowork@gmail.com</br>
  * <p><b>注释：</b></p>
- * 抽象数据库，允许同时多线程读，但同时只允许一个线程写，且读写互斥
+ * 抽象数据库
  */
 
-public abstract class AbstractDatabase implements IDatabase {
+public abstract class AbstractDatabase implements IDatabaseExecutor {
     private static final String TAG = "AbstractDatabase";
 
-    public static final int POOL_SIZE_DEFAULT = 5;
+    public static final int FLAG_CREATED = 0;
+    public static final int FLAG_UPGRADED = 1;
     private final Context mContext;
-    private final ReadWriteLock mRwLock = new ReentrantReadWriteLock();
-    private final HelperPools mHelperPools;
+    private volatile int mFlags = 0;
+    private final IDatabaseExecutor mExecutor;
+    private final String mDatabaseName;
+    private volatile boolean isOpen = false;
 
-    public AbstractDatabase(Context context) {
-        this(context, POOL_SIZE_DEFAULT);
+    public AbstractDatabase(Context context, String name) {
+        this(context,name, null);
     }
 
     /**
      * 创建一个数据库
-     * @param context context
-     * @param poolSize 连接池的大小，可以理解成最多允许poolSize个线程读数据库
+     * @param context  context
+     * @param executor 数据库执行器
      */
-    public AbstractDatabase(Context context, int poolSize) {
+    public AbstractDatabase(Context context, String name, IDatabaseExecutor executor) {
         mContext = context;
-        mHelperPools = new HelperPools(poolSize, context, this);
+        mDatabaseName = name;
+        if(executor == null){
+            if(isWriteAheadLoggingEnabled()){
+                executor = new WALDatabaseExecutor(context,this);
+            }else{
+                executor = new LockDatabaseExecutor(context,this);
+            }
+        }
+        mExecutor = executor;
+        isOpen = true;
+    }
+
+    protected boolean isNeedEnableWAL(){
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB;
+    }
+
+    public final boolean isWriteAheadLoggingEnabled(){
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB && isNeedEnableWAL();
+    }
+
+    @Override
+    public synchronized void close() {
+        mExecutor.close();
+        isOpen = false;
+    }
+
+    @Override
+    public boolean isOpen() {
+        return isOpen;
+    }
+
+    private void throwIfNotOpen(){
+        if(!isOpen){
+            throw new IllegalStateException(String.format("%s already closed !",TAG));
+        }
     }
 
     public String storagePath() {
         return mContext.getDatabasePath(databaseName()).getPath();
     }
 
-    public abstract String databaseName();
+    public final String databaseName(){
+        return mDatabaseName;
+    }
 
     public abstract SparseArray<ITable[]> staticTables();
 
     public abstract int databaseVersion();
 
+    public final void setFlagValue(int flag,boolean bool){
+        if(bool){
+            mFlags =  (mFlags | (1 << flag));
+        }else{
+            mFlags = (mFlags & (~(1 << flag)));
+        }
+    }
+
+    public final boolean getFlagValue(int flag){
+        return ((mFlags >>> flag) & 1) == 1;
+    }
+
     @Override
     public final long insert(String table, String nullColumnHack, ContentValues values) {
-        mRwLock.writeLock().lock();
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
+        long result = -1;
         try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            long result = helper.getWritableDatabase().insert(table, nullColumnHack, values);
-            mHelperPools.recycle(helper);
-            return result;
+            result = mExecutor.insert(table,nullColumnHack,values);
         } catch (Exception e) {
             e.printStackTrace();
             logErrorMessage(table, "insert", e, String.valueOf(values));
-        } finally {
-            mRwLock.writeLock().unlock();
         }
-        return -1;
+        if(SLog.isDebug()){
+            logDurationMessage(table,"insert", System.currentTimeMillis() - t1);
+        }
+        return result;
     }
 
     @Override
     public final int delete(String table, String whereClause, String[] whereArgs) {
-        mRwLock.writeLock().lock();
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
+        int result = 0;
         try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            int result = helper.getWritableDatabase().delete(table, whereClause, whereArgs);
-            mHelperPools.recycle(helper);
-            return result;
+            result = mExecutor.delete(table,whereClause,whereArgs);
         } catch (Exception e) {
             e.printStackTrace();
             logErrorMessage(table, "delete", e, String.format("whereClause = %s，whereArgs = %s", whereClause, Arrays.toString(whereArgs)));
-        } finally {
-            mRwLock.writeLock().unlock();
         }
-        return -1;
+        if(SLog.isDebug()){
+            logDurationMessage(table,"delete", System.currentTimeMillis() - t1);
+        }
+        return result;
     }
 
     @Override
     public final int update(String table, ContentValues values, String whereClause, String[] whereArgs) {
-        mRwLock.writeLock().lock();
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
+        int result = 0;
         try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            int result = helper.getWritableDatabase().update(table, values, whereClause, whereArgs);
-            mHelperPools.recycle(helper);
-            return result;
+            result = mExecutor.update(table,values,whereClause,whereArgs);
         } catch (Exception e) {
             e.printStackTrace();
             logErrorMessage(table, "update", e, String.format("ContentValues = %s，whereClause = %s，whereArgs = %s", String.valueOf(values), whereClause, Arrays.toString(whereArgs)));
-        } finally {
-            mRwLock.writeLock().unlock();
         }
-        return -1;
+        if(SLog.isDebug()){
+            logDurationMessage(table,"update", System.currentTimeMillis() - t1);
+        }
+        return result;
     }
 
     @Override
     public final long replace(String table, String nullColumnHack, ContentValues initialValues) {
-        mRwLock.writeLock().lock();
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
+        long result = -1;
         try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            long result = helper.getWritableDatabase().replace(table, nullColumnHack, initialValues);
-            mHelperPools.recycle(helper);
-            return result;
+            result = mExecutor.replace(table,nullColumnHack,initialValues);
         } catch (Exception e) {
             e.printStackTrace();
             logErrorMessage(table, "replace", e, String.valueOf(initialValues));
-        } finally {
-            mRwLock.writeLock().unlock();
         }
-        return -1;
+        if(SLog.isDebug()){
+            logDurationMessage(table,"replace", System.currentTimeMillis() - t1);
+        }
+        return result;
     }
 
     @Override
     public final Cursor rawQuery(String sql, String[] selectionArgs) {
-        mRwLock.readLock().lock();
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
+        Cursor result = null;
         try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            SQLiteDatabase db = helper.getReadableDatabase();
-            Cursor result = db.rawQuery(sql, selectionArgs);
-            mHelperPools.recycle(helper);
-            return result;
+            result = mExecutor.rawQuery(sql,selectionArgs);
         } catch (Exception e) {
             e.printStackTrace();
-            logErrorMessage("rawQuery", "rawQuery", e, String.format("sql = %s，selectionArgs = %s", sql, Arrays.toString(selectionArgs)));
-        } finally {
-            mRwLock.readLock().unlock();
+            logErrorMessage("rawQuery", "rawQuery：", e, String.format("sql = %s，selectionArgs = %s", sql, Arrays.toString(selectionArgs)));
         }
-        return null;
+        if(SLog.isDebug()){
+            logDurationMessage("unknown","rawQuery："+sql, System.currentTimeMillis() - t1);
+        }
+        return result;
     }
 
     @Override
     public final void execSQL(boolean isWrite, String sql, Object[] bindArgs) throws SQLException {
-        final Lock lock = isWrite ? mRwLock.writeLock() : mRwLock.readLock();
-        lock.lock();
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
         try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            SQLiteDatabase db = isWrite ? helper.getWritableDatabase() : helper.getReadableDatabase();
-            db.execSQL(sql, bindArgs);
-            mHelperPools.recycle(helper);
+            mExecutor.execSQL(isWrite,sql,bindArgs);
         } catch (SQLException e) {
             e.printStackTrace();
-            logErrorMessage("execSQL","execSQL",e,String.format("isWrite = %s，sql = %s，bindArgs = %s",isWrite,sql,Arrays.toString(bindArgs)));
+            logErrorMessage("execSQL", "execSQL", e, String.format("isWrite = %s，sql = %s，bindArgs = %s", isWrite, sql, Arrays.toString(bindArgs)));
             throw e;
-        } finally {
-            lock.unlock();
+        }
+        if(SLog.isDebug()){
+            logDurationMessage("unknown","isWrite = "+isWrite+"，execSQL："+sql, System.currentTimeMillis() - t1);
         }
     }
 
     @Override
-    public final <T> T executeTransaction(final boolean isWrite, SQLiteRunnable<T> r) {
-        final Lock lock = isWrite ? mRwLock.writeLock() : mRwLock.readLock();
-        lock.lock();
-        try {
-            CocoSQLiteOpenHelper helper = mHelperPools.take();
-            SQLiteDatabase db = isWrite ? helper.getWritableDatabase() : helper.getReadableDatabase();
-            T result = r.run(db);
-            if(!db.isOpen()){
-                throw new UnsupportedOperationException(databaseName() + " executeTransaction SQLiteRunnable run not allow call SQLiteDatabase.close()");
-            }
-            mHelperPools.recycle(helper);
-            return result;
-        } catch (Exception e) {
+    public final <T> T executeTransaction(boolean isWrite, SQLiteRunnable<T> r) {
+        throwIfNotOpen();
+        long t1 = System.currentTimeMillis();
+        T result = null;
+        try{
+            result = mExecutor.executeTransaction(isWrite,r);
+        }catch (Exception e){
             e.printStackTrace();
             logErrorMessage("executeTransaction", "executeTransaction", e, String.format("isWrite = %s", isWrite));
-        } finally {
-            lock.unlock();
         }
-        return null;
+        if(SLog.isDebug()){
+            logDurationMessage("unknown","isWrite = "+isWrite+"，executeTransaction", System.currentTimeMillis() - t1);
+        }
+        return result;
     }
 
     private void logErrorMessage(String table, String method, Exception e, String msg) {
-        Log.e(TAG, String.format("databaseName = %s：table = %s->method = %s，Exception：%s[%s]，msg = %s", databaseName(), table, method, e.getClass(), e.getMessage(), msg));
+        SLog.e(TAG, String.format("%s[%s]：%s->[%s]，Exception：%s[%s]，msg = %s",mExecutor.getClass().getSimpleName(),databaseName(),table, method, e.getClass(), e.getMessage(), msg));
     }
 
-    private static class HelperPools{
-        private static final String TAG = "HelperPools";
-        private final int mMaxPoolSize;
-        private final Pools.SimplePool<CocoSQLiteOpenHelper> mPools;
-        private final Context context;
-        private final AbstractDatabase databaseProxy;
-        private final Object mLock = new Object();
-        private volatile int mInstanceCount = 0;
-
-        public HelperPools(int maxPoolSize, Context context, AbstractDatabase proxy) {
-            this.mMaxPoolSize = maxPoolSize;
-            mPools = new Pools.SimplePool<>(maxPoolSize);
-            this.context = context;
-            this.databaseProxy = proxy;
-        }
-
-        /**
-         * 从池中获取一个对象，如果超出最大数量限制，则阻塞
-         * @return 取回结果
-         */
-        public CocoSQLiteOpenHelper take() {
-            synchronized (mLock){
-                while (mInstanceCount >= mMaxPoolSize) {
-                    try {
-                        mLock.wait();
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                        Log.e(TAG,"take()，InterruptedException ："+e.getMessage());
-                    }
-                }
-                CocoSQLiteOpenHelper instance = mPools.acquire();
-                if (instance == null) {
-                    instance = new CocoSQLiteOpenHelper(context, databaseProxy);
-                }
-                mInstanceCount++;
-                //Log.d(TAG,"obtain(),sInstanceCount = "+mInstanceCount+",MAX_POOL_SIZE = "+mMaxPoolSize);
-                return instance;
-            }
-        }
-
-        /***
-         * 回收对象到对象池
-         * @param helper 待回收的对象
-         * @return 成功true
-         */
-        public boolean recycle(CocoSQLiteOpenHelper helper) {
-            synchronized (mLock){
-                if (mPools.release(helper)) {
-                    mInstanceCount--;
-                    mLock.notify();
-                    //Log.d(TAG,"recycle(),sInstanceCount = "+sInstanceCount+",MAX_POOL_SIZE = "+MAX_POOL_SIZE);
-                    return true;
-                }
-                return false;
-            }
-        }
+    private void logDurationMessage(String table, String method, long duration){
+        SLog.d(TAG, String.format("%s[%s]：[%s]->[%s]，duration = %sms",mExecutor.getClass().getSimpleName(),databaseName(),table,method,duration));
     }
 }

@@ -1,16 +1,14 @@
 package com.haiblee.lib;
 
 
-import android.util.Log;
-
 /**
  * Created by Haibiao.Li on 2017/3/15 0015 12:21.
  * <br>Email:lihaibiaowork@gmail.com</br>
  * <p><b>注释：</b></p>
  */
 
-public class SQLHelper {
-    private static final String TAG = "SQLHelper";
+public class SQLCreator {
+    private static final String TAG = "SQLCreator";
     public static boolean DEBUG = true;
     private static final String BLANK = " ";
     private static final String CREATE_TABLE = "CREATE TABLE IF NOT EXISTS";
@@ -34,7 +32,7 @@ public class SQLHelper {
     private static final String DROP = "DROP";
     private static final String DOT = ".";
 
-    public static String createTableSQL(String tableName,TableField[] fields){
+    public static String createTableSQL(String tableName, TableField[] fields){
         StringBuilder b = new StringBuilder();
         b.append(CREATE_TABLE).append(BLANK);
         b.append(String.format(FORMAT_SINGLE_QT,tableName)).append(BLANK);
@@ -49,7 +47,7 @@ public class SQLHelper {
             }
         }
         b.append(BRACKET_RIGHT);
-        if(DEBUG) Log.d(TAG, String.format("createTableSQL：[%s]",b.toString()));
+        if(DEBUG) SLog.d(TAG, String.format("createTableSQL：[%s]",b.toString()));
         return b.toString();
     }
 
@@ -78,17 +76,13 @@ public class SQLHelper {
             if(field.hasAttr(TableField.FLAG_NOT_NULL)){
                 b.append(NOT_NULL);
                 b.append(BLANK);
-                if(field.hasAttr(TableField.FLAG_UNIQUE)){
-                    b.append(UNIQUE);
-                    b.append(BLANK);
-                }
             }
         }
-        if(DEBUG) Log.d(TAG,String.format("createFieldRowSQL：[%s]，TableField = [%s]",b.toString(),field.toString()));
+        if(DEBUG) SLog.d(TAG, String.format("createFieldRowSQL：[%s]，TableField = [%s]",b.toString(),field.toString()));
         return b.toString();
     }
 
-    public static String createIndex(String tableName,TableField field){
+    public static String createIndex(String tableName, TableField field){
         StringBuilder b = null;
         if(field.hasAttr(TableField.FLAG_INDEX_KEY)){
             b = new StringBuilder();
@@ -98,29 +92,31 @@ public class SQLHelper {
                 b.append(CREATE_INDEX);
             }
             b.append(BLANK);
-            b.append(field.getIndexName()).append(BLANK);
+            b.append(tableName);
+            b.append("_");
+            b.append(field.getName()).append(BLANK);
             b.append(ON).append(BLANK);
             b.append(tableName).append(BLANK);
             b.append(BRACKET_LEFT).append(field.getName()).append(BRACKET_RIGHT);
             b.append(SEMICOLON);
         }
         String result = b == null ? null : b.toString();
-        if(DEBUG) Log.d(TAG,String.format("createIndex：[%s]，TableField = [%s]",result,field.toString()));
+        if(DEBUG) SLog.d(TAG, String.format("createIndex：[%s]，TableField = [%s]",result,field.toString()));
         return result;
     }
 
-    public static String addTableFild(String tableName,TableField field){
+    public static String addTableField(String tableName, TableField field){
         return ALTER + BLANK + TABLE + BLANK +
                 tableName + BLANK + ADD + BLANK +
                 field.getName() + BLANK + field.getTyped().toString();
     }
 
-    public static String dropTable(String dbName,String tableName){
+    public static String dropTable(String dbName, String tableName){
         return DROP + BLANK + TABLE + BLANK + dbName + DOT + tableName;
     }
 
     public static void main(String[] args){
-        SQLHelper.DEBUG = false;
+        SQLCreator.DEBUG = false;
         TableField[] fields = new TableField[10];
         for(int i = 0 ; i < fields.length ; i++){
             if(i == 2){
@@ -133,14 +129,13 @@ public class SQLHelper {
                 }
                 if(i == 4){
                     fields[i].setAttrFlag(TableField.FLAG_INDEX_KEY | TableField.FLAG_NOT_NULL | TableField.FLAG_UNIQUE);
-                    fields[i].setIndexName("MyIndexName_"+i);
                 }
             }
         }
         System.out.println("CreateTable: " + createTableSQL("Goods",fields));
         System.out.println("CreateIndex: "+ createIndex("Goods",fields[4]));
 
-        System.out.println("二进制值为："+Integer.toBinaryString(10));
+        System.out.println("二进制值为："+ Integer.toBinaryString(10));
     }
 
 }

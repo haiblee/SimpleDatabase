@@ -21,6 +21,10 @@ public class MyDatabase extends AbstractDatabase {
 
     private static MyDatabase INSTANCE = null;
 
+    private MyDatabase(Context context) {
+        super(context, DB_NAME,null);
+    }
+
     public static MyDatabase getDefault(){
         if(INSTANCE == null){
             synchronized (MyDatabase.class){
@@ -30,19 +34,6 @@ public class MyDatabase extends AbstractDatabase {
             }
         }
         return INSTANCE;
-    }
-
-    private MyDatabase(Context context) {
-        super(context);
-    }
-
-    private MyDatabase(Context context, int poolSize) {
-        super(context, poolSize);
-    }
-
-    @Override
-    public String databaseName() {
-        return DB_NAME;
     }
 
     @Override
